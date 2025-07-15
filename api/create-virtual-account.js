@@ -1,13 +1,14 @@
 // File: api/create-virtual-account.js
 
-const axios = require('axios');
+import axios from 'axios';
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Only POST allowed' });
+    return res.status(405).json({ message: 'Only POST method is allowed' });
   }
 
   const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
+
   const { email, first_name, last_name, userId } = req.body;
 
   if (!email || !userId) {
@@ -15,7 +16,7 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // 1. Create customer on Paystack
+    // 1. Create Customer on Paystack
     const customerRes = await axios.post(
       'https://api.paystack.co/customer',
       {
@@ -25,13 +26,16 @@ module.exports = async (req, res) => {
         metadata: { userId },
       },
       {
-        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET}`,
+          'Content-Type': 'application/json',
+        },
       }
     );
 
     const customerCode = customerRes.data.data.customer_code;
 
-    // 2. Create dedicated virtual account
+    // 2. Create Dedicated Virtual Account
     const accountRes = await axios.post(
       'https://api.paystack.co/dedicated_account',
       {
@@ -39,7 +43,10 @@ module.exports = async (req, res) => {
         preferred_bank: 'wema-bank',
       },
       {
-        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET}`,
+          'Content-Type': 'application/json',
+        },
       }
     );
 
@@ -53,16 +60,11 @@ module.exports = async (req, res) => {
         customer_code: customerCode,
       },
     });
-    
-    } catch (error) {
-  const paystackError = error.response?.data || { message: error.message || 'Unknown error' };
-  console.error('Paystack error:', paystackError);
-
-  return res.status(500).json({
-    message: 'Paystack account creation failed',
-    error: paystackError,
-  });
+  } catch (error) {
+    console.error('❌ PAYSTACK ERROR:', error.response?.data || error.message);
+    return res.status(500).json({
+      message: 'Paystack account creation failed',
+      error: error.response?.data || error.message,
+    });
+  }
 }
-
-
-};
