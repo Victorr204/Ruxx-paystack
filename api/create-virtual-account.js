@@ -1,8 +1,8 @@
 // File: api/create-virtual-account.js
 
-import axios from 'axios';
+const axios = require('axios');
 
-export default async function handler(req, res) {
+module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Only POST allowed' });
   }
@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Create customer
+    // 1. Create customer on Paystack
     const customerRes = await axios.post(
       'https://api.paystack.co/customer',
       {
@@ -31,7 +31,7 @@ export default async function handler(req, res) {
 
     const customerCode = customerRes.data.data.customer_code;
 
-    // 2. Create virtual account
+    // 2. Create dedicated virtual account
     const accountRes = await axios.post(
       'https://api.paystack.co/dedicated_account',
       {
@@ -57,4 +57,4 @@ export default async function handler(req, res) {
     console.error('Paystack error:', error.response?.data || error.message);
     return res.status(500).json({ message: 'Paystack account creation failed' });
   }
-}
+};

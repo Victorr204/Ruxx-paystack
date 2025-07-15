@@ -1,0 +1,25 @@
+{
+  "name": "paystack-backend",
+  "version": "1.0.0",
+  "description": "paystack backend for virtual account",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Victorr204/Ruxx-paystack.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Victorr204/Ruxx-paystack/issues"
+  },
+  "homepage": "https://github.com/Victorr204/Ruxx-paystack#readme",
+  "dependencies": {
+    "axios": "^1.10.0",
+    "dotenv": "^17.2.0"
+  }
+}
