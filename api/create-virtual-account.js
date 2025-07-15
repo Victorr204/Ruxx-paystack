@@ -53,8 +53,12 @@ module.exports = async (req, res) => {
         customer_code: customerCode,
       },
     });
-  } catch (error) {
-    console.error('Paystack error:', error.response?.data || error.message);
-    return res.status(500).json({ message: 'Paystack account creation failed' });
-  }
+  }  catch (error) {
+  console.error('Paystack error:', error.response?.data || error.message); // 👈 Add this!
+  return res.status(500).json({ 
+    message: 'Paystack account creation failed', 
+    error: error.response?.data || error.message 
+  });
+}
+
 };
