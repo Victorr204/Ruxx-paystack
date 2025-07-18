@@ -97,4 +97,9 @@ module.exports = async (req, res) => {
     bank: { name: "Wema Bank" }
   }
 });
+
+res.status(400).json({
+  success: false,
+  message: "Failed to create virtual account"
+});
 };
