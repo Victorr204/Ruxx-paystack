@@ -1,0 +1,9 @@
+{
+  "success": true,
+  "message": "Your JSON response is working!",
+  "data": {
+    "account_name": "John Doe",
+    "account_number": "0123456789",
+    "bank": { "name": "Wema Bank" }
+  }
+}
