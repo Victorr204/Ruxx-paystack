@@ -2,42 +2,44 @@ const { Client, Databases } = require("appwrite");
 const axios = require("axios");
 
 module.exports = async (req, res) => {
-  if (req.method !== "POST") return res.status(405).json({ success: false, message: "Method Not Allowed" });
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, message: "Method Not Allowed" });
+  }
 
   const { userId, email, firstName, lastName, phone } = req.body;
 
-  const client = new Client()
-    .setEndpoint(process.env.APPWRITE_ENDPOINT)
-    .setProject(process.env.APPWRITE_PROJECT_ID)
-    .setKey(process.env.APPWRITE_API_KEY);
-
-  const databases = new Databases(client);
-
   try {
-    // Step 0: Check if user already has a virtual account
-    const existingDoc = await databases.getDocument(
-      process.env.APPWRITE_DATABASE_ID,
-      process.env.APPWRITE_COLLECTION_ID,
-      userId
-    );
+    const client = new Client()
+      .setEndpoint(process.env.APPWRITE_ENDPOINT)
+      .setProject(process.env.APPWRITE_PROJECT_ID)
+      .setKey(process.env.APPWRITE_API_KEY);
 
-    if (existingDoc.assigned) {
-      return res.status(200).json({
-        success: true,
-        account: {
-          account_name: existingDoc.account_name,
-          account_number: existingDoc.account_number,
-          bank: { name: existingDoc.bank_name }
-        },
-        message: "Virtual account already exists"
-      });
+    const databases = new Databases(client);
+
+    // Check if user already has a virtual account
+    try {
+      const existingDoc = await databases.getDocument(
+        process.env.APPWRITE_DATABASE_ID,
+        process.env.APPWRITE_COLLECTION_ID,
+        userId
+      );
+
+      if (existingDoc.assigned) {
+        return res.status(200).json({
+          success: true,
+          account: {
+            account_name: existingDoc.account_name,
+            account_number: existingDoc.account_number,
+            bank: { name: existingDoc.bank_name }
+          },
+          message: "Virtual account already exists"
+        });
+      }
+    } catch (err) {
+      // Document not found — continue to create
     }
-  } catch (err) {
-    // If document doesn't exist, continue to create
-  }
 
-  try {
-    // Step 1: Create Paystack Customer
+    // Create Paystack customer
     const customerRes = await axios.post(
       "https://api.paystack.co/customer",
       {
@@ -56,7 +58,7 @@ module.exports = async (req, res) => {
 
     const customerCode = customerRes.data.data.customer_code;
 
-    // Step 2: Create Virtual Account
+    // Create virtual account
     const accountRes = await axios.post(
       "https://api.paystack.co/dedicated_account",
       {
@@ -73,7 +75,7 @@ module.exports = async (req, res) => {
 
     const accountData = accountRes.data.data;
 
-    // Step 3: Save to Appwrite
+    // Save to Appwrite
     await databases.createDocument(
       process.env.APPWRITE_DATABASE_ID,
       process.env.APPWRITE_COLLECTION_ID,
@@ -89,7 +91,6 @@ module.exports = async (req, res) => {
       }
     );
 
-    // ✅ Final Response
     return res.status(200).json({
       success: true,
       account: {
@@ -100,10 +101,10 @@ module.exports = async (req, res) => {
       message: "Virtual account created successfully"
     });
   } catch (error) {
-    console.error("❌ Error creating virtual account:", error.message);
+    console.error("❌ Server error:", error.message);
     return res.status(500).json({
       success: false,
-      message: "Failed to create virtual account"
+      message: "Server error: " + error.message
     });
   }
 };
