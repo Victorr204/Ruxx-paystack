@@ -7,6 +7,36 @@ module.exports = async (req, res) => {
 
   const { userId, email, firstName, lastName, phone } = req.body;
 
+  const client = new Client()
+    .setEndpoint(process.env.APPWRITE_ENDPOINT)
+    .setProject(process.env.APPWRITE_PROJECT_ID)
+    .setKey(process.env.APPWRITE_API_KEY);
+
+  const databases = new Databases(client);
+
+  // Step 0: Check if user already has a virtual account
+  try {
+    const existingDoc = await databases.getDocument(
+      process.env.APPWRITE_DATABASE_ID,
+      process.env.APPWRITE_COLLECTION_ID,
+      userId
+    );
+
+    if (existingDoc.assigned) {
+      return res.status(200).json({
+        success: true,
+        account: {
+          account_name: existingDoc.account_name,
+          account_number: existingDoc.account_number,
+          bank_name: existingDoc.bank_name
+        },
+        message: "Virtual account already exists"
+      });
+    }
+  } catch (err) {
+    // If document doesn't exist, continue
+  }
+
   // Step 1: Create Paystack Customer
   const customerRes = await axios.post(
     "https://api.paystack.co/customer",
@@ -44,24 +74,18 @@ module.exports = async (req, res) => {
   const accountData = accountRes.data.data;
 
   // Step 3: Save to Appwrite
-  const client = new Client()
-    .setEndpoint(process.env.APPWRITE_ENDPOINT)
-    .setProject(process.env.APPWRITE_PROJECT_ID)
-    .setKey(process.env.APPWRITE_API_KEY);
-
-  const databases = new Databases(client);
-
   await databases.createDocument(
     process.env.APPWRITE_DATABASE_ID,
     process.env.APPWRITE_COLLECTION_ID,
-    userId, // Use userId as document ID
+    userId,
     {
       email,
       account_name: accountData.account_name,
       account_number: accountData.account_number,
       bank_name: accountData.bank.name,
       customer_code: customerCode,
-      assigned: true
+      assigned: true,
+      balance: 0
     }
   );
 
