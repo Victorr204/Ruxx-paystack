@@ -1,4 +1,4 @@
-const { Client, Databases } = require("appwrite");
+const { Client, Databases } = require("node-appwrite"); // ✅ correct SDK
 const axios = require("axios");
 
 module.exports = async (req, res) => {
