@@ -89,5 +89,12 @@ module.exports = async (req, res) => {
     }
   );
 
-  res.status(200).json({ success: true, account: accountData });
+  res.status(200).json({
+  success: true,
+  account: {
+    account_name: "John Doe",
+    account_number: "0123456789",
+    bank: { name: "Wema Bank" }
+  }
+});
 };
