@@ -8,7 +8,16 @@ module.exports = async (req, res) => {
 
   const { userId, email, firstName, lastName, phone } = req.body;
 
+  // Validate required fields
+  if (!userId || !email || !firstName || !lastName || !phone) {
+    return res.status(400).json({
+      success: false,
+      message: "Missing required fields"
+    });
+  }
+
   try {
+    // Initialize Appwrite client
     const client = new Client()
       .setEndpoint(process.env.APPWRITE_ENDPOINT)
       .setProject(process.env.APPWRITE_PROJECT_ID)
@@ -91,6 +100,7 @@ module.exports = async (req, res) => {
       }
     );
 
+    // Return success response
     return res.status(200).json({
       success: true,
       account: {
