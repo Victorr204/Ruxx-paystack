@@ -37,6 +37,7 @@ module.exports = async (req, res) => {
       {
         customer: customerCode,
         preferred_bank: 'wema-bank',
+        metadata: { userId },
       },
       {
         headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
