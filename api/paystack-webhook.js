@@ -1,76 +1,83 @@
-// File: /api/paystack-webhook.js
-import { Client, Databases, ID, Query } from 'node-appwrite';
+// File: api/paystack-webhook.js
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).send('Only POST allowed');
+const { Client, Databases } = require('node-appwrite');
+const crypto = require('crypto');
 
-  const secret = req.headers['x-paystack-signature'];
-  const rawBody = await buffer(req);
-  const crypto = require('crypto');
+const axios = require('axios');
 
-  const hash = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY).update(rawBody).digest('hex');
-  if (hash !== secret) {
-    return res.status(401).send('Unauthorized');
+// Appwrite setup
+const client = new Client()
+  .setEndpoint(process.env.APPWRITE_ENDPOINT)
+  .setProject(process.env.APPWRITE_PROJECT_ID)
+  .setKey(process.env.APPWRITE_API_KEY);
+
+const databases = new Databases(client);
+
+// Webhook secret from Paystack dashboard
+const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
+const PAYSTACK_WEBHOOK_SECRET = process.env.PAYSTACK_WEBHOOK_SECRET;
+
+// Your Appwrite DB & Collection IDs
+const DATABASE_ID = process.env.APPWRITE_DATABASE_ID;
+const VIRTUAL_ACCOUNT_COLLECTION = 'virtual_accounts';
+const USERS_COLLECTION = 'users';
+
+module.exports = async (req, res) => {
+  // 1. Verify signature
+  const hash = crypto
+    .createHmac('sha512', PAYSTACK_WEBHOOK_SECRET)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+
+  if (hash !== req.headers['x-paystack-signature']) {
+    return res.status(401).json({ message: 'Invalid webhook signature' });
   }
 
-  const event = JSON.parse(rawBody.toString());
+  const event = req.body;
 
   if (event.event === 'charge.success') {
-    const data = event.data;
-    const userId = data.metadata?.userId;
-    const amount = data.amount / 100;
+    const tx = event.data;
+    const amount = tx.amount / 100; // Convert kobo to Naira
+    const customerCode = tx.customer?.customer_code;
 
-    if (!userId) return res.status(400).json({ message: 'Missing userId in metadata' });
-
-    // Update Appwrite wallet
-    const client = new Client()
-      .setEndpoint(process.env.APPWRITE_ENDPOINT)
-      .setProject(process.env.APPWRITE_PROJECT_ID)
-      .setKey(process.env.APPWRITE_API_KEY);
-
-    const databases = new Databases(client);
-    const dbId = process.env.APPWRITE_DB_ID;
-    const userCol = process.env.APPWRITE_USERS_COLLECTION;
-    const txCol = process.env.APPWRITE_TX_COLLECTION;
+    if (!customerCode) {
+      console.log('No customer_code found in webhook.');
+      return res.status(400).json({ message: 'Missing customer code' });
+    }
 
     try {
-      // Fetch user doc
-      const userDocs = await databases.listDocuments(dbId, userCol, [Query.equal('userId', userId)]);
-      if (!userDocs.total) throw new Error('User not found');
-      const userDoc = userDocs.documents[0];
+      // 2. Find virtual account by customer_code
+      const list = await databases.listDocuments(
+        DATABASE_ID,
+        VIRTUAL_ACCOUNT_COLLECTION,
+        [ // Appwrite Query
+          Appwrite.Query.equal('customer_code', customerCode)
+        ]
+      );
 
-      const currentBalance = Number(userDoc.balance || 0);
-      const newBalance = currentBalance + amount;
+      if (!list.total || list.documents.length === 0) {
+        return res.status(404).json({ message: 'No virtual account matched' });
+      }
 
-      // Update balance
-      await databases.updateDocument(dbId, userCol, userDoc.$id, { balance: newBalance });
+      const virtualAccount = list.documents[0];
+      const userId = virtualAccount.userId;
 
-      // Save transaction
-      await databases.createDocument(dbId, txCol, ID.unique(), {
-        userId,
-        amount,
-        type: 'credit',
-        status: 'success',
-        reference: data.reference,
-        method: 'virtual_account',
-        time: new Date().toISOString()
+      // 3. Update user balance
+      const userDoc = await databases.getDocument(DATABASE_ID, USERS_COLLECTION, userId);
+      const currentBalance = userDoc.balance || 0;
+
+      await databases.updateDocument(DATABASE_ID, USERS_COLLECTION, userId, {
+        balance: currentBalance + amount
       });
 
-      return res.status(200).send('OK');
+      console.log(`Balance updated for user: ${userId} | +₦${amount}`);
+      return res.status(200).json({ message: 'Balance updated' });
+
     } catch (error) {
-      console.error('Webhook error:', error.message);
-      return res.status(500).json({ message: 'Failed to update wallet' });
+      console.error('Error handling webhook:', error);
+      return res.status(500).json({ message: 'Error updating balance', error: error.message });
     }
   }
 
-  return res.status(200).send('Ignored');
-}
-
-// Required to parse raw body
-export const config = {
-  api: {
-    bodyParser: false,
-  },
+  return res.status(200).json({ message: 'Webhook received (ignored event)' });
 };
-
-import { buffer } from 'micro'; // install micro
