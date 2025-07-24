@@ -1,83 +1,75 @@
-// File: api/paystack-webhook.js
-
-const { Client, Databases } = require('node-appwrite');
 const crypto = require('crypto');
+const { Client, Databases, Query } = require('node-appwrite');
 
-const axios = require('axios');
-
-// Appwrite setup
-const client = new Client()
-  .setEndpoint(process.env.APPWRITE_ENDPOINT)
-  .setProject(process.env.APPWRITE_PROJECT_ID)
-  .setKey(process.env.APPWRITE_API_KEY);
-
-const databases = new Databases(client);
-
-// Webhook secret from Paystack dashboard
-const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
-const PAYSTACK_WEBHOOK_SECRET = process.env.PAYSTACK_WEBHOOK_SECRET;
-
-// Your Appwrite DB & Collection IDs
+// Load env
+const PAYSTACK_WEBHOOK_SECRET = process.env.PAYSTACK_SECRET_KEY;
+const APPWRITE_PROJECT_ID = process.env.APPWRITE_PROJECT_ID;
+const APPWRITE_ENDPOINT = process.env.APPWRITE_ENDPOINT;
+const APPWRITE_API_KEY = process.env.APPWRITE_API_KEY;
 const DATABASE_ID = process.env.APPWRITE_DATABASE_ID;
-const VIRTUAL_ACCOUNT_COLLECTION = 'virtual_accounts';
 const USERS_COLLECTION = 'users';
 
 module.exports = async (req, res) => {
-  // 1. Verify signature
+  const rawBody = JSON.stringify(req.body);
+  const signature = req.headers['x-paystack-signature'];
+
   const hash = crypto
     .createHmac('sha512', PAYSTACK_WEBHOOK_SECRET)
-    .update(JSON.stringify(req.body))
+    .update(rawBody)
     .digest('hex');
 
-  if (hash !== req.headers['x-paystack-signature']) {
-    return res.status(401).json({ message: 'Invalid webhook signature' });
+  if (hash !== signature) {
+    return res.status(401).send('Invalid signature');
   }
 
   const event = req.body;
 
   if (event.event === 'charge.success') {
-    const tx = event.data;
-    const amount = tx.amount / 100; // Convert kobo to Naira
-    const customerCode = tx.customer?.customer_code;
+    const customerCode = event.data.customer?.customer_code;
+    const amount = event.data.amount / 100; // kobo to NGN
 
-    if (!customerCode) {
-      console.log('No customer_code found in webhook.');
-      return res.status(400).json({ message: 'Missing customer code' });
-    }
+    if (!customerCode) return res.status(400).json({ message: 'Missing customer code' });
+
+    // Appwrite setup
+    const client = new Client()
+      .setEndpoint(APPWRITE_ENDPOINT)
+      .setProject(APPWRITE_PROJECT_ID)
+      .setKey(APPWRITE_API_KEY);
+
+    const databases = new Databases(client);
 
     try {
-      // 2. Find virtual account by customer_code
-      const list = await databases.listDocuments(
+      // 1. Find user with matching customer_code
+      const userDocs = await databases.listDocuments(
         DATABASE_ID,
-        VIRTUAL_ACCOUNT_COLLECTION,
-        [ // Appwrite Query
-          Appwrite.Query.equal('customer_code', customerCode)
-        ]
+        USERS_COLLECTION,
+        [Query.equal('customer_code', customerCode)]
       );
 
-      if (!list.total || list.documents.length === 0) {
-        return res.status(404).json({ message: 'No virtual account matched' });
+      if (userDocs.total === 0) {
+        return res.status(404).json({ message: 'User not found for this customer code' });
       }
 
-      const virtualAccount = list.documents[0];
-      const userId = virtualAccount.userId;
-
-      // 3. Update user balance
-      const userDoc = await databases.getDocument(DATABASE_ID, USERS_COLLECTION, userId);
+      const userDoc = userDocs.documents[0];
       const currentBalance = userDoc.balance || 0;
 
-      await databases.updateDocument(DATABASE_ID, USERS_COLLECTION, userId, {
-        balance: currentBalance + amount
-      });
+      // 2. Update balance
+      await databases.updateDocument(
+        DATABASE_ID,
+        USERS_COLLECTION,
+        userDoc.$id,
+        {
+          balance: currentBalance + amount,
+        }
+      );
 
-      console.log(`Balance updated for user: ${userId} | +₦${amount}`);
       return res.status(200).json({ message: 'Balance updated' });
 
-    } catch (error) {
-      console.error('Error handling webhook:', error);
-      return res.status(500).json({ message: 'Error updating balance', error: error.message });
+    } catch (err) {
+      console.error('Appwrite error:', err.message);
+      return res.status(500).json({ error: 'Internal error updating balance' });
     }
   }
 
-  return res.status(200).json({ message: 'Webhook received (ignored event)' });
+  return res.status(200).send('OK');
 };
