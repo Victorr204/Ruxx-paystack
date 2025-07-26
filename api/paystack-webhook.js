@@ -79,6 +79,20 @@ app.post('/api/paystack-webhook', async (req, res) => {
         );
       }
 
+      // 3. Save notification document
+      await databases.createDocument(
+        process.env.APPWRITE_DATABASE_ID,
+        process.env.NOTIFICATIONS_COLLECTION_ID, // make sure this is defined in your env
+        'unique()',
+        {
+          userId: userId,
+          title: 'Deposit Successful',
+          message: `Your wallet was credited with ₦${depositAmount}`,
+          type: 'deposit',
+          createdAt: new Date().toISOString()
+        }
+      );
+
       return res.sendStatus(200);
     } catch (err) {
       console.error('Webhook processing error:', err);
