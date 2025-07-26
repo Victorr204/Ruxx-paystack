@@ -1,6 +1,5 @@
-// File: api/create-virtual-account.js
-
 const axios = require('axios');
+const { Client, Databases } = require('node-appwrite');
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
@@ -46,6 +45,29 @@ module.exports = async (req, res) => {
 
     const account = accountRes.data.data;
 
+    // 3. Save to Appwrite
+    const client = new Client()
+      .setEndpoint(process.env.APPWRITE_ENDPOINT)
+      .setProject(process.env.APPWRITE_PROJECT_ID)
+      .setKey(process.env.APPWRITE_API_KEY);
+
+    const databases = new Databases(client);
+
+    await databases.updateDocument(
+      process.env.APPWRITE_DATABASE_ID,
+      process.env.USER_COLLECTION_ID,
+      userId,
+      {
+        virtualAccount: {
+          bank_name: account.bank.name,
+          account_number: account.account_number,
+          account_name: account.account_name,
+          customer_code: customerCode,
+        },
+        paystackCustomerCode: customerCode, // <- flatten for webhook
+      }
+    );
+
     return res.status(200).json({
       virtualAccount: {
         bank_name: account.bank.name,
@@ -54,16 +76,13 @@ module.exports = async (req, res) => {
         customer_code: customerCode,
       },
     });
-    
-    } catch (error) {
-  const paystackError = error.response?.data || { message: error.message || 'Unknown error' };
-  console.error('Paystack error:', paystackError);
+  } catch (error) {
+    const paystackError = error.response?.data || { message: error.message || 'Unknown error' };
+    console.error('Paystack error:', paystackError);
 
-  return res.status(500).json({
-    message: 'Paystack account creation failed',
-    error: paystackError,
-  });
-}
-
-
+    return res.status(500).json({
+      message: 'Paystack account creation failed',
+      error: paystackError,
+    });
+  }
 };
