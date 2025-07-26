@@ -1,83 +1,91 @@
-// File: api/paystack-webhook.js
+import { AppwriteClient, Databases, Query } from 'node-appwrite';
+import express from 'express';
+import crypto from 'crypto';
 
-const crypto = require('crypto');
-const { Client, Databases, Query } = require("node-appwrite");
+const app = express();
+app.use(express.json());
 
-const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
-const WEBHOOK_SECRET = process.env.PAYSTACK_WEBHOOK_SECRET;
-
-module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    return res.status(405).send('Method Not Allowed');
-  }
-
-  // 🔍 Debug: Log the full webhook body
-  console.log('📥 Webhook received:', JSON.stringify(req.body, null, 2));
-
-  // Step 1: Verify Webhook Signature
-  const signature = req.headers['x-paystack-signature'];
-  const hash = crypto
-    .createHmac('sha512', WEBHOOK_SECRET)
-    .update(JSON.stringify(req.body))
-    .digest('hex');
-
-  if (hash !== signature) {
-    console.warn('❌ Signature mismatch');
-    return res.status(401).send('Unauthorized - Invalid Signature');
-  }
-
-  const event = req.body.event;
-  const data = req.body.data;
-
-  if (event === 'charge.success' && data.status === 'success') {
-    const customerCode = data.customer.customer_code;
-    const amountInKobo = data.amount;
-
-    console.log('✅ charge.success for customer:', customerCode, '| Amount:', amountInKobo);
-
-    // Connect to Appwrite
-    const client = new Client()
-      .setEndpoint(process.env.APPWRITE_ENDPOINT)
+const client = new AppwriteClient();
+client.setEndpoint(process.env.APPWRITE_ENDPOINT)
       .setProject(process.env.APPWRITE_PROJECT_ID)
       .setKey(process.env.APPWRITE_API_KEY);
 
-    const databases = new Databases(client);
-    const databaseId = process.env.APPWRITE_DATABASE_ID;
-    const collectionId = 'users'; // Replace with your actual collection
+const databases = new Databases(client);
+
+app.post('/api/paystack-webhook', async (req, res) => {
+  const secret = process.env.PAYSTACK_WEBHOOK_SECRET;
+
+  const hash = crypto
+    .createHmac('sha512', secret)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+
+  if (hash !== req.headers['x-paystack-signature']) {
+    return res.status(401).send('Unauthorized');
+  }
+
+  const event = req.body;
+  console.log('Webhook received:', event.event);
+
+  if (event.event === 'transfer.success' || event.event === 'charge.success') {
+    const metadata = event.data?.metadata;
+    const customerCode = event.data?.customer?.customer_code;
 
     try {
-      // Step 2: Search user by customer code in nested field
-      const userDocs = await databases.listDocuments(
-        databaseId,
-        collectionId,
-        [Query.equal("virtualAccount.customer_code", customerCode)]
+      // 1. Find user with matching virtualAccount (customer_code)
+      const users = await databases.listDocuments(
+        process.env.APPWRITE_DATABASE_ID,
+        process.env.USER_COLLECTION_ID,
+        [Query.equal('virtualAccount', customerCode)]
       );
 
-      if (userDocs.total === 0) {
-        console.warn('⚠️ No matching user for customer_code:', customerCode);
-        return res.status(404).send('User not found');
+      if (users.total === 0) {
+        console.log('No user found for customer code:', customerCode);
+        return res.sendStatus(404);
       }
 
-      const user = userDocs.documents[0];
-      const newBalance = (user.balance || 0) + amountInKobo / 100;
+      const user = users.documents[0];
+      const userId = user.userId;
+      const depositAmount = parseFloat(event.data.amount) / 100;
 
-      console.log(`💰 Updating balance for user ${user.$id}: Old: ${user.balance || 0}, New: ${newBalance}`);
-
-      // Step 3: Update user balance
-      await databases.updateDocument(
-        databaseId,
-        collectionId,
-        user.$id,
-        { balance: newBalance }
+      // 2. Check if balance document already exists
+      const balances = await databases.listDocuments(
+        process.env.APPWRITE_DATABASE_ID,
+        process.env.BALANCE_COLLECTION_ID,
+        [Query.equal('userId', userId)]
       );
 
-      return res.status(200).send('Balance updated');
-    } catch (error) {
-      console.error('🔥 Error updating balance:', error.message || error);
-      return res.status(500).send('Server error');
+      if (balances.total > 0) {
+        const balanceDoc = balances.documents[0];
+        const newBalance = (parseFloat(balanceDoc.amount) || 0) + depositAmount;
+
+        await databases.updateDocument(
+          process.env.APPWRITE_DATABASE_ID,
+          process.env.BALANCE_COLLECTION_ID,
+          balanceDoc.$id,
+          { amount: newBalance }
+        );
+      } else {
+        // Create new balance document
+        await databases.createDocument(
+          process.env.APPWRITE_DATABASE_ID,
+          process.env.BALANCE_COLLECTION_ID,
+          'unique()',
+          {
+            userId,
+            amount: depositAmount
+          }
+        );
+      }
+
+      return res.sendStatus(200);
+    } catch (err) {
+      console.error('Webhook processing error:', err);
+      return res.sendStatus(500);
     }
   }
 
-  console.log(`ℹ️ Event received but not processed: ${event}`);
-  return res.status(200).send('Event received');
-};
+  return res.sendStatus(200);
+});
+
+export default app;
