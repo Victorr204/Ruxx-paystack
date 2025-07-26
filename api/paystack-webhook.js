@@ -1,16 +1,18 @@
-import { AppwriteClient, Databases, Query } from 'node-appwrite';
+import sdk from 'node-appwrite';
 import express from 'express';
 import crypto from 'crypto';
 
 const app = express();
 app.use(express.json());
 
-const client = new AppwriteClient();
-client.setEndpoint(process.env.APPWRITE_ENDPOINT)
-      .setProject(process.env.APPWRITE_PROJECT_ID)
-      .setKey(process.env.APPWRITE_API_KEY);
+const client = new sdk.Client();
+client
+  .setEndpoint(process.env.APPWRITE_ENDPOINT)
+  .setProject(process.env.APPWRITE_PROJECT_ID)
+  .setKey(process.env.APPWRITE_API_KEY);
 
-const databases = new Databases(client);
+const databases = new sdk.Databases(client);
+const Query = sdk.Query;
 
 app.post('/api/paystack-webhook', async (req, res) => {
   const secret = process.env.PAYSTACK_WEBHOOK_SECRET;
@@ -28,11 +30,10 @@ app.post('/api/paystack-webhook', async (req, res) => {
   console.log('Webhook received:', event.event);
 
   if (event.event === 'transfer.success' || event.event === 'charge.success') {
-    const metadata = event.data?.metadata;
     const customerCode = event.data?.customer?.customer_code;
 
     try {
-      // 1. Find user with matching virtualAccount (customer_code)
+      // 1. Find user with matching virtualAccount
       const users = await databases.listDocuments(
         process.env.APPWRITE_DATABASE_ID,
         process.env.USER_COLLECTION_ID,
