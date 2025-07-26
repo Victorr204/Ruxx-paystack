@@ -37,7 +37,7 @@ app.post('/api/paystack-webhook', async (req, res) => {
       const users = await databases.listDocuments(
         process.env.APPWRITE_DATABASE_ID,
         process.env.USER_COLLECTION_ID,
-        [Query.equal('virtualAccount', customerCode)]
+        [Query.equal('paystackCustomerCode', customerCode)]
       );
 
       if (users.total === 0) {
